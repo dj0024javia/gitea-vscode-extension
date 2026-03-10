@@ -1,0 +1,235 @@
+import * as vscode from 'vscode';
+import { GiteaApiClient } from '../api/giteaApiClient';
+import { AuthManager } from '../auth/authManager';
+import { RepoManager, RepoInfo } from '../context/repoManager';
+import type { GiteaPullRequest } from '../api/types';
+
+export type PRFilter = 'open' | 'closed';
+
+interface RepoPRState {
+    prs: GiteaPullRequest[];
+    page: number;
+    hasMore: boolean;
+    loading: boolean;
+}
+
+// ── Tree items ────────────────────────────────────────────────────────────────
+
+export class RepoGroupItem extends vscode.TreeItem {
+    constructor(public readonly repoInfo: RepoInfo, authed: boolean) {
+        super(`${repoInfo.owner}/${repoInfo.repo}`, vscode.TreeItemCollapsibleState.Expanded);
+        this.contextValue = 'repoGroup';
+        this.description = repoInfo.currentBranch ? `(${repoInfo.currentBranch})` : '';
+        this.iconPath = new vscode.ThemeIcon(authed ? 'repo' : 'repo-forked');
+        this.tooltip = `${repoInfo.serverUrl}/${repoInfo.owner}/${repoInfo.repo}`;
+    }
+}
+
+export class PullRequestItem extends vscode.TreeItem {
+    constructor(
+        public readonly pr: GiteaPullRequest,
+        public readonly repoInfo: RepoInfo
+    ) {
+        super(`#${pr.number} ${pr.title}`, vscode.TreeItemCollapsibleState.Collapsed);
+        this.contextValue = 'pullRequest';
+        this.tooltip = new vscode.MarkdownString(
+            `**#${pr.number}** ${pr.title}\n\n` +
+            `By **${pr.user.login}** · ${pr.state} · ${pr.comments} comment(s)\n\n` +
+            `\`${pr.head.ref}\` → \`${pr.base.ref}\``
+        );
+        this.iconPath = this.getIcon(pr);
+        this.description = `${pr.user.login} · ${relativeTime(pr.updated_at)}`;
+    }
+
+    private getIcon(pr: GiteaPullRequest): vscode.ThemeIcon {
+        if (pr.merged) { return new vscode.ThemeIcon('git-merge', new vscode.ThemeColor('gitDecoration.addedResourceForeground')); }
+        if (pr.state === 'closed') { return new vscode.ThemeIcon('git-pull-request-closed', new vscode.ThemeColor('gitDecoration.deletedResourceForeground')); }
+        return new vscode.ThemeIcon('git-pull-request', new vscode.ThemeColor('charts.green'));
+    }
+}
+
+export class PRChildItem extends vscode.TreeItem {
+    constructor(label: string, description?: string, icon?: vscode.ThemeIcon) {
+        super(label, vscode.TreeItemCollapsibleState.None);
+        if (description) { this.description = description; }
+        if (icon) { this.iconPath = icon; }
+    }
+}
+
+export class LoadMorePRItem extends vscode.TreeItem {
+    constructor(public readonly repoKey: string, filter: PRFilter) {
+        super('Load more...', vscode.TreeItemCollapsibleState.None);
+        this.contextValue = 'loadMore';
+        this.iconPath = new vscode.ThemeIcon('ellipsis');
+        this.command = {
+            command: 'gitea.loadMorePRs',
+            title: 'Load more pull requests',
+            arguments: [repoKey, filter]
+        };
+    }
+}
+
+// ── Provider ──────────────────────────────────────────────────────────────────
+
+export class PullRequestProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private filter: PRFilter = 'open';
+    private stateMap = new Map<string, RepoPRState>();
+
+    constructor(
+        private readonly api: GiteaApiClient,
+        private readonly repoManager: RepoManager,
+        private readonly auth: AuthManager
+    ) {
+        repoManager.onDidChange(() => this.refresh());
+        auth.onDidChangeSession(() => this.refresh());
+    }
+
+    setFilter(filter: PRFilter): void {
+        this.filter = filter;
+        this.refresh();
+    }
+
+    refresh(): void {
+        this.stateMap.clear();
+        this._onDidChangeTreeData.fire();
+    }
+
+    async loadMore(repoKey: string): Promise<void> {
+        const state = this.stateMap.get(repoKey);
+        if (!state || state.loading || !state.hasMore) { return; }
+        state.page += 1;
+        const repoInfo = this.repoManager.getRepos().find(r => r.key === repoKey);
+        if (repoInfo) { await this.fetchForRepo(repoInfo, state); }
+    }
+
+    getTreeItem(element: vscode.TreeItem): vscode.TreeItem { return element; }
+
+    async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+        // ── Root: one group node per detected repo ───────────────────────────
+        if (!element) {
+            const repos = this.repoManager.getRepos();
+            if (repos.length === 0) {
+                const item = new vscode.TreeItem('No Gitea repositories detected', vscode.TreeItemCollapsibleState.None);
+                item.iconPath = new vscode.ThemeIcon('info');
+                item.command = { command: 'gitea.signIn', title: 'Sign In' };
+                return [item];
+            }
+            const items: vscode.TreeItem[] = [];
+            for (const r of repos) {
+                const session = await this.auth.getSession(r.serverUrl);
+                items.push(new RepoGroupItem(r, !!session));
+            }
+            return items;
+        }
+
+        // ── Repo group: PRs for that repo ─────────────────────────────────────
+        if (element instanceof RepoGroupItem) {
+            const { repoInfo } = element;
+            const session = await this.auth.getSession(repoInfo.serverUrl);
+            if (!session) {
+                const signIn = new vscode.TreeItem('Sign in to load pull requests', vscode.TreeItemCollapsibleState.None);
+                signIn.iconPath = new vscode.ThemeIcon('account');
+                signIn.command = { command: 'gitea.signIn', title: 'Sign In' };
+                return [signIn];
+            }
+            return this.getRepoChildren(repoInfo);
+        }
+
+        // ── PR detail children ────────────────────────────────────────────────
+        if (element instanceof PullRequestItem) {
+            return buildPRChildren(element.pr, element.repoInfo);
+        }
+
+        return [];
+    }
+
+    private async getRepoChildren(repoInfo: RepoInfo): Promise<vscode.TreeItem[]> {
+        let state = this.stateMap.get(repoInfo.key);
+        if (!state) {
+            state = { prs: [], page: 1, hasMore: false, loading: false };
+            this.stateMap.set(repoInfo.key, state);
+            await this.fetchForRepo(repoInfo, state);
+            return [];
+        }
+        if (state.loading) {
+            const item = new vscode.TreeItem('Loading...', vscode.TreeItemCollapsibleState.None);
+            item.iconPath = new vscode.ThemeIcon('loading~spin');
+            return [item];
+        }
+        if (state.prs.length === 0) {
+            const empty = new vscode.TreeItem(`No ${this.filter} pull requests`, vscode.TreeItemCollapsibleState.None);
+            empty.iconPath = new vscode.ThemeIcon('info');
+            return [empty];
+        }
+        const items: vscode.TreeItem[] = state.prs.map(pr => new PullRequestItem(pr, repoInfo));
+        if (state.hasMore) { items.push(new LoadMorePRItem(repoInfo.key, this.filter)); }
+        return items;
+    }
+
+    private async fetchForRepo(repoInfo: RepoInfo, state: RepoPRState): Promise<void> {
+        if (state.loading) { return; }
+        state.loading = true;
+        this._onDidChangeTreeData.fire();
+        try {
+            const config = vscode.workspace.getConfiguration('gitea');
+            const limit: number = config.get<number>('itemsPerPage') ?? 20;
+            const result = await this.api.listPullRequests(repoInfo, this.filter, state.page, limit);
+            state.prs = state.page === 1 ? result.items : [...state.prs, ...result.items];
+            state.hasMore = result.hasMore;
+        } catch (err) {
+            vscode.window.showErrorMessage(`[${repoInfo.label}] Failed to load PRs: ${(err as Error).message}`);
+            state.prs = [];
+            state.hasMore = false;
+        } finally {
+            state.loading = false;
+            this._onDidChangeTreeData.fire();
+        }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function relativeTime(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) { return `${mins}m ago`; }
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) { return `${hrs}h ago`; }
+    return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function buildPRChildren(pr: GiteaPullRequest, repoInfo: RepoInfo): vscode.TreeItem[] {
+    const children: vscode.TreeItem[] = [];
+
+    children.push(new PRChildItem(
+        `${pr.head.ref} → ${pr.base.ref}`, undefined, new vscode.ThemeIcon('git-branch')
+    ));
+    children.push(new PRChildItem(
+        `+${pr.additions ?? '?'} / -${pr.deletions ?? '?'}`, `${pr.changed_files ?? '?'} file(s) changed`, new vscode.ThemeIcon('diff')
+    ));
+    if (pr.comments > 0 || pr.review_comments > 0) {
+        children.push(new PRChildItem(
+            `${pr.comments} comment(s), ${pr.review_comments} review comment(s)`,
+            undefined, new vscode.ThemeIcon('comment-discussion')
+        ));
+    }
+    if (pr.labels && pr.labels.length > 0) {
+        children.push(new PRChildItem(pr.labels.map(l => l.name).join(', '), 'labels', new vscode.ThemeIcon('tag')));
+    }
+    if (pr.assignees && pr.assignees.length > 0) {
+        children.push(new PRChildItem(pr.assignees.map(a => a.login).join(', '), 'assignees', new vscode.ThemeIcon('person')));
+    }
+
+    const openItem = new PRChildItem('Open in Browser', undefined, new vscode.ThemeIcon('link-external'));
+    openItem.command = { command: 'gitea.openPR', title: 'Open PR in Browser', arguments: [pr] };
+    children.push(openItem);
+
+    const detailItem = new PRChildItem('View Details', undefined, new vscode.ThemeIcon('eye'));
+    detailItem.command = { command: 'gitea.viewPRDetail', title: 'View PR Details', arguments: [pr, repoInfo] };
+    children.push(detailItem);
+
+    return children;
+}

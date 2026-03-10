@@ -1,0 +1,140 @@
+{
+  "name": "gitea-vscode",
+  "displayName": "Gitea for VS Code",
+  "description": "Pull requests, CI/Actions, and repository management for self-hosted Gitea",
+  "version": "0.1.0",
+  "publisher": "gitea-vscode",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["SCM Providers", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "icon": "resources/gitea.png",
+  "contributes": {
+    "configuration": {
+      "title": "Gitea",
+      "properties": {
+        "gitea.servers": {
+          "type": "array",
+          "default": [],
+          "description": "List of Gitea server configurations",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string", "description": "Gitea server base URL" },
+              "label": { "type": "string", "description": "Display label for this server" }
+            },
+            "required": ["url"]
+          }
+        },
+        "gitea.defaultServer": {
+          "type": "string",
+          "default": "",
+          "description": "Default Gitea server URL"
+        },
+        "gitea.reviewsPerPage": {
+          "type": "number",
+          "default": 20,
+          "description": "Number of items to fetch per page"
+        },
+        "gitea.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Override the Gitea server URL for all detected repositories. Use this when your git remote uses a different hostname than the web UI (e.g. SSH host vs HTTPS host). Example: https://code.example.com"
+        },
+        "gitea.itemsPerPage": {
+          "type": "number",
+          "default": 20,
+          "description": "Number of pull requests / CI runs to show per page"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gitea",
+          "title": "Gitea",
+          "icon": "resources/gitea-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "gitea": [
+        { "id": "gitea.pullRequests", "name": "Pull Requests", "icon": "resources/gitea-activity.svg" },
+        { "id": "gitea.issues", "name": "Issues", "icon": "resources/gitea-activity.svg" },
+        { "id": "gitea.ciRuns", "name": "CI / Actions", "icon": "resources/gitea-activity.svg" }
+      ]
+    },
+    "commands": [
+      { "command": "gitea.signIn", "title": "Gitea: Sign In" },
+      { "command": "gitea.signOut", "title": "Gitea: Sign Out" },
+      { "command": "gitea.addServer", "title": "Gitea: Add Server" },
+      { "command": "gitea.refreshPRs", "title": "Gitea: Refresh Pull Requests", "icon": "$(refresh)" },
+      { "command": "gitea.refreshCI", "title": "Gitea: Refresh CI Runs", "icon": "$(refresh)" },
+      { "command": "gitea.refreshIssues", "title": "Gitea: Refresh Issues", "icon": "$(refresh)" },
+      { "command": "gitea.openPR", "title": "Gitea: Open Pull Request in Browser" },
+      { "command": "gitea.checkoutPR", "title": "Gitea: Checkout Pull Request Branch" },
+      { "command": "gitea.createPR", "title": "Gitea: Create Pull Request" },
+      { "command": "gitea.mergePR", "title": "Gitea: Merge Pull Request" },
+      { "command": "gitea.approvePR", "title": "Gitea: Approve Pull Request" },
+      { "command": "gitea.requestChangesPR", "title": "Gitea: Request Changes on Pull Request" },
+      { "command": "gitea.addComment", "title": "Gitea: Add Comment" },
+      { "command": "gitea.openRunInBrowser", "title": "Gitea: Open Run in Browser" },
+      { "command": "gitea.rerunWorkflow", "title": "Gitea: Re-run Workflow" },
+      { "command": "gitea.cancelRun", "title": "Gitea: Cancel Run" },
+      { "command": "gitea.viewLogs", "title": "Gitea: View Job Logs" },
+      { "command": "gitea.switchRepo", "title": "Gitea: Switch Repository" },
+      { "command": "gitea.openIssue", "title": "Gitea: Open Issue in Browser" },
+      { "command": "gitea.viewIssueDetail", "title": "Gitea: View Issue Details" },
+      { "command": "gitea.createIssue", "title": "Gitea: Create Issue" },
+      { "command": "gitea.closeIssue", "title": "Gitea: Close Issue" },
+      { "command": "gitea.reopenIssue", "title": "Gitea: Re-open Issue" },
+      { "command": "gitea.addIssueComment", "title": "Gitea: Add Issue Comment" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "gitea.refreshPRs", "when": "view == gitea.pullRequests", "group": "navigation" },
+        { "command": "gitea.createPR", "when": "view == gitea.pullRequests", "group": "navigation" },
+        { "command": "gitea.refreshCI", "when": "view == gitea.ciRuns", "group": "navigation" },
+        { "command": "gitea.refreshIssues", "when": "view == gitea.issues", "group": "navigation" },
+        { "command": "gitea.createIssue", "when": "view == gitea.issues", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "gitea.checkoutPR", "when": "viewItem == pullRequest", "group": "pr@1" },
+        { "command": "gitea.openPR", "when": "viewItem == pullRequest", "group": "pr@2" },
+        { "command": "gitea.approvePR", "when": "viewItem == pullRequest", "group": "pr@3" },
+        { "command": "gitea.mergePR", "when": "viewItem == pullRequest", "group": "pr@4" },
+        { "command": "gitea.viewLogs", "when": "viewItem == ciJob", "group": "ci@1" },
+        { "command": "gitea.openRunInBrowser", "when": "viewItem == ciRun", "group": "ci@2" },
+        { "command": "gitea.rerunWorkflow", "when": "viewItem == ciRun", "group": "ci@3" },
+        { "command": "gitea.cancelRun", "when": "viewItem == ciRun", "group": "ci@4" },
+        { "command": "gitea.viewIssueDetail", "when": "viewItem == issue_open || viewItem == issue_closed", "group": "issue@1" },
+        { "command": "gitea.openIssue", "when": "viewItem == issue_open || viewItem == issue_closed", "group": "issue@2" },
+        { "command": "gitea.addIssueComment", "when": "viewItem == issue_open || viewItem == issue_closed", "group": "issue@3" },
+        { "command": "gitea.closeIssue", "when": "viewItem == issue_open", "group": "issue@4" },
+        { "command": "gitea.reopenIssue", "when": "viewItem == issue_closed", "group": "issue@4" }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/test-electron": "^2.3.0",
+    "mocha": "^10.0.0",
+    "@types/mocha": "^10.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

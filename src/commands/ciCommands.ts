@@ -1,0 +1,122 @@
+import * as vscode from 'vscode';
+import { GiteaApiClient } from '../api/giteaApiClient';
+import { CIRunsProvider, CIRunItem, CIJobItem } from '../views/ciRunsProvider';
+import { CIDetailPanel } from '../views/ciDetailPanel';
+import type { GiteaWorkflowRun } from '../api/types';
+import type { RepoInfo } from '../context/repoManager';
+
+export function registerCICommands(
+    context: vscode.ExtensionContext,
+    api: GiteaApiClient,
+    ciProvider: CIRunsProvider
+): void {
+    context.subscriptions.push(
+        vscode.commands.registerCommand('gitea.refreshCI', () => ciProvider.refresh()),
+
+        vscode.commands.registerCommand('gitea.loadMoreCI', (repoKey: string) => {
+            ciProvider.loadMore(repoKey);
+        }),
+
+        vscode.commands.registerCommand('gitea.openRunInBrowser', async (arg: CIRunItem | GiteaWorkflowRun) => {
+            const run = arg instanceof CIRunItem ? arg.run : arg;
+            await vscode.env.openExternal(vscode.Uri.parse(run.html_url));
+        }),
+
+        vscode.commands.registerCommand('gitea.viewCIDetail', async (arg: CIRunItem) => {
+            if (!(arg instanceof CIRunItem)) { return; }
+            await CIDetailPanel.show(api, arg.repoInfo, arg.run);
+        }),
+
+        vscode.commands.registerCommand('gitea.rerunWorkflow', async (arg: CIRunItem | GiteaWorkflowRun) => {
+            const run = arg instanceof CIRunItem ? arg.run : arg;
+            const repoInfo = arg instanceof CIRunItem ? arg.repoInfo : undefined;
+            if (!repoInfo) { vscode.window.showErrorMessage('Cannot determine repository for this run.'); return; }
+            await rerunWorkflow(api, repoInfo, run, ciProvider);
+        }),
+
+        vscode.commands.registerCommand('gitea.cancelRun', async (arg: CIRunItem | GiteaWorkflowRun) => {
+            const run = arg instanceof CIRunItem ? arg.run : arg;
+            const repoInfo = arg instanceof CIRunItem ? arg.repoInfo : undefined;
+            if (!repoInfo) { vscode.window.showErrorMessage('Cannot determine repository for this run.'); return; }
+            await cancelRun(api, repoInfo, run, ciProvider);
+        }),
+
+        vscode.commands.registerCommand('gitea.viewLogs', async (arg: CIJobItem) => {
+            if (!(arg instanceof CIJobItem)) {
+                vscode.window.showWarningMessage('Select a job to view its logs.');
+                return;
+            }
+            await viewLogs(api, arg.repoInfo, arg.job.id, arg.job.name);
+        })
+    );
+}
+
+async function rerunWorkflow(
+    api: GiteaApiClient,
+    repoInfo: RepoInfo,
+    run: GiteaWorkflowRun,
+    ciProvider: CIRunsProvider
+): Promise<void> {
+    const confirm = await vscode.window.showWarningMessage(
+        `Re-run workflow run #${run.run_number}?`,
+        { modal: true }, 'Re-run'
+    );
+    if (confirm !== 'Re-run') { return; }
+
+    await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Triggering re-run...' },
+        async () => {
+            try {
+                await api.rerunWorkflow(repoInfo, run.id);
+                vscode.window.showInformationMessage('Re-run triggered.');
+                setTimeout(() => ciProvider.refresh(), 2000);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Re-run failed: ${(err as Error).message}`);
+            }
+        }
+    );
+}
+
+async function cancelRun(
+    api: GiteaApiClient,
+    repoInfo: RepoInfo,
+    run: GiteaWorkflowRun,
+    ciProvider: CIRunsProvider
+): Promise<void> {
+    const confirm = await vscode.window.showWarningMessage(
+        `Cancel run #${run.run_number}?`,
+        { modal: true }, 'Cancel Run'
+    );
+    if (confirm !== 'Cancel Run') { return; }
+
+    await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Cancelling run...' },
+        async () => {
+            try {
+                await api.cancelWorkflowRun(repoInfo, run.id);
+                vscode.window.showInformationMessage('Run cancelled.');
+                setTimeout(() => ciProvider.refresh(), 1500);
+            } catch (err) {
+                vscode.window.showErrorMessage(`Cancel failed: ${(err as Error).message}`);
+            }
+        }
+    );
+}
+
+async function viewLogs(api: GiteaApiClient, repoInfo: RepoInfo, jobId: number, jobName: string): Promise<void> {
+    await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Loading logs for "${jobName}"...` },
+        async () => {
+            try {
+                const logs = await api.getJobLogs(repoInfo, jobId);
+                const doc = await vscode.workspace.openTextDocument({
+                    content: logs,
+                    language: 'log'
+                });
+                await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+            } catch (err) {
+                vscode.window.showErrorMessage(`Failed to load logs: ${(err as Error).message}`);
+            }
+        }
+    );
+}

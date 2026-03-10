@@ -6,14 +6,14 @@ A VS Code extension that brings your [Gitea](https://gitea.io) repositories dire
 
 ## Features
 
-| Feature | Description |
-|---|---|
-| **Pull Requests** | Browse, filter, merge, close, re-open PRs across all repos and submodules |
+| Feature                | Description                                                                                                                |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Pull Requests**      | Browse, filter, merge, close, re-open PRs across all repos and submodules                                                  |
 | **Inline Code Review** | GitHub-style diff viewer — click any line to comment, mark files as viewed, submit approve/request-changes/comment reviews |
-| **Issues** | Browse open/closed issues, create, close, re-open, add comments |
-| **CI / Actions** | See workflow runs and job statuses, re-run or cancel jobs, view logs |
-| **Multi-repo** | Automatically detects all git remotes and submodules in your VS Code workspace |
-| **Status Bar** | Shows active repo + auth state at a glance |
+| **Issues**             | Browse open/closed issues, create, close, re-open, add comments                                                            |
+| **CI / Actions**       | See workflow runs and job statuses, re-run or cancel jobs, view logs                                                       |
+| **Multi-repo**         | Automatically detects all git remotes and submodules in your VS Code workspace                                             |
+| **Status Bar**         | Shows active repo + auth state at a glance                                                                                 |
 
 ---
 
@@ -55,11 +55,11 @@ code --install-extension gitea-vscode-*.vsix
 
 ### Required Permissions
 
-| Permission | Level | Reason |
-|---|---|---|
+| Permission     | Level        | Reason                                         |
+| -------------- | ------------ | ---------------------------------------------- |
 | **Repository** | Read & Write | Browse PRs, issues, create comments, merge PRs |
-| **Issue** | Read & Write | Browse and manage issues |
-| **Actions** | Read | View CI workflow runs and job logs |
+| **Issue**      | Read & Write | Browse and manage issues                       |
+| **Actions**    | Read         | View CI workflow runs and job logs             |
 
 > `Write` on Repository is needed for merge, approve, close/re-open, and inline review actions. If you only want read-only access, set all to `Read`.
 
@@ -76,6 +76,7 @@ Gitea: Sign In
 ```
 
 You will be prompted for:
+
 - **Server URL** — e.g. `https://git.example.com` (no trailing slash)
 - **API Token** — the token you generated above
 
@@ -83,9 +84,9 @@ The extension will automatically set `gitea.serverUrl` in your VS Code settings.
 
 ### Settings
 
-| Setting | Default | Description |
-|---|---|---|
-| `gitea.serverUrl` | `""` | Override the Gitea server URL (useful when SSH hostname differs from HTTPS) |
+| Setting           | Default | Description                                                                 |
+| ----------------- | ------- | --------------------------------------------------------------------------- |
+| `gitea.serverUrl` | `""`    | Override the Gitea server URL (useful when SSH hostname differs from HTTPS) |
 
 **When do you need `gitea.serverUrl`?**
 If your git remote uses SSH (`git@code-ssh.example.com`) but the API runs on a different hostname (`https://code.example.com`), set `gitea.serverUrl` to the HTTPS URL so the extension can match authentication correctly.
@@ -124,12 +125,14 @@ The Files tab mirrors GitHub's PR review experience:
 ### Issues
 
 The **Issues** panel works similarly to PRs:
+
 - Expand an issue to see labels, assignees, milestone, comment count
 - **View Details** opens a webview with full body, existing comments, a comment form, and close/re-open buttons
 
 ### CI / Actions
 
 The **CI / Actions** panel shows workflow runs per repository:
+
 - Expand a run to see individual jobs
 - Context menu → **Re-run Workflow** or **Cancel Run**
 - Context menu → **View Job Logs** opens the log output in a webview

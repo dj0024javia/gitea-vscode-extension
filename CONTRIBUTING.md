@@ -32,6 +32,7 @@ code .
 Press **F5** (or `Run → Start Debugging`) to launch the Extension Development Host — a new VS Code window with the extension loaded from source.
 
 Any TypeScript changes require recompiling:
+
 ```bash
 npm run compile
 # or keep a watcher running:
@@ -48,16 +49,16 @@ npx vsce package --no-dependencies --allow-missing-repository
 
 ## Project Structure
 
-| Path | Contents |
-|---|---|
-| `src/api/` | Gitea REST API client + TypeScript types |
-| `src/auth/` | Token storage via VS Code `SecretStorage` |
-| `src/commands/` | Command registrations (PR, CI, Issue, Auth) |
-| `src/context/` | Multi-repo detection using the `vscode.git` API |
-| `src/ui/` | Status bar item |
-| `src/views/` | Tree data providers + webview panels |
-| `resources/` | Static assets (icons, SVGs) |
-| `package.json` | Extension manifest (commands, views, menus, settings) |
+| Path            | Contents                                              |
+| --------------- | ----------------------------------------------------- |
+| `src/api/`      | Gitea REST API client + TypeScript types              |
+| `src/auth/`     | Token storage via VS Code `SecretStorage`             |
+| `src/commands/` | Command registrations (PR, CI, Issue, Auth)           |
+| `src/context/`  | Multi-repo detection using the `vscode.git` API       |
+| `src/ui/`       | Status bar item                                       |
+| `src/views/`    | Tree data providers + webview panels                  |
+| `resources/`    | Static assets (icons, SVGs)                           |
+| `package.json`  | Extension manifest (commands, views, menus, settings) |
 
 ---
 

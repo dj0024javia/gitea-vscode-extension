@@ -1,366 +1,572 @@
-import * as vscode from 'vscode';
-import { GiteaApiClient } from '../api/giteaApiClient';
-import type { RepoInfo } from '../context/repoManager';
+import * as vscode from "vscode";
+import { GiteaApiClient } from "../api/giteaApiClient";
+import type { RepoInfo } from "../context/repoManager";
 import type {
-    GiteaPullRequest, GiteaComment, GiteaReview, GiteaFileDiff,
-    GiteaCommit, GiteaReviewComment
-} from '../api/types';
+  GiteaPullRequest,
+  GiteaComment,
+  GiteaReview,
+  GiteaFileDiff,
+  GiteaCommit,
+  GiteaReviewComment,
+} from "../api/types";
 
 // ── Raw diff parser ──────────────────────────────────────────────────────────
 
 /** Parse a unified diff string into a map of filename → patch string */
 function parseRawDiff(raw: string): Map<string, string> {
-    const map = new Map<string, string>();
-    const fileBlocks = raw.split(/^diff --git /m).slice(1);
-    for (const block of fileBlocks) {
-        // Extract the b/ filename from the first line
-        const firstLine = block.split('\n')[0];
-        const mB = firstLine.match(/ b\/(.+)$/);
-        if (!mB) { continue; }
-        const filename = mB[1].trim();
-        // Extract everything from the first @@ header onwards
-        const hunkIdx = block.indexOf('\n@@');
-        const patch = hunkIdx >= 0 ? block.slice(hunkIdx + 1) : '';
-        map.set(filename, patch);
+  const map = new Map<string, string>();
+  const fileBlocks = raw.split(/^diff --git /m).slice(1);
+  for (const block of fileBlocks) {
+    // Extract the b/ filename from the first line
+    const firstLine = block.split("\n")[0];
+    const mB = firstLine.match(/ b\/(.+)$/);
+    if (!mB) {
+      continue;
     }
-    return map;
+    const filename = mB[1].trim();
+    // Extract everything from the first @@ header onwards
+    const hunkIdx = block.indexOf("\n@@");
+    const patch = hunkIdx >= 0 ? block.slice(hunkIdx + 1) : "";
+    map.set(filename, patch);
+  }
+  return map;
 }
 
 interface DiffLine {
-    type: 'hunk' | 'add' | 'del' | 'ctx' | 'meta';
-    content: string;
-    oldLine?: number;
-    newLine?: number;
-    pos: number;
+  type: "hunk" | "add" | "del" | "ctx" | "meta";
+  content: string;
+  oldLine?: number;
+  newLine?: number;
+  pos: number;
 }
 
 function parsePatch(patch: string): DiffLine[] {
-    if (!patch?.trim()) { return []; }
-    const result: DiffLine[] = [];
-    let oldLine = 0, newLine = 0, pos = 0;
-    for (const raw of patch.split('\n')) {
-        pos++;
-        if (raw.startsWith('@@')) {
-            const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-            if (m) { oldLine = parseInt(m[1]) - 1; newLine = parseInt(m[2]) - 1; }
-            result.push({ type: 'hunk', content: raw, pos });
-        } else if (raw.startsWith('+')) {
-            newLine++;
-            result.push({ type: 'add', content: raw.slice(1), newLine, pos });
-        } else if (raw.startsWith('-')) {
-            oldLine++;
-            result.push({ type: 'del', content: raw.slice(1), oldLine, pos });
-        } else if (raw.startsWith('\\')) {
-            result.push({ type: 'meta', content: raw, pos });
-        } else if (raw !== '') {
-            oldLine++; newLine++;
-            result.push({ type: 'ctx', content: raw.slice(1), oldLine, newLine, pos });
-        }
+  if (!patch?.trim()) {
+    return [];
+  }
+  const result: DiffLine[] = [];
+  let oldLine = 0,
+    newLine = 0,
+    pos = 0;
+  for (const raw of patch.split("\n")) {
+    pos++;
+    if (raw.startsWith("@@")) {
+      const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) {
+        oldLine = parseInt(m[1]) - 1;
+        newLine = parseInt(m[2]) - 1;
+      }
+      result.push({ type: "hunk", content: raw, pos });
+    } else if (raw.startsWith("+")) {
+      newLine++;
+      result.push({ type: "add", content: raw.slice(1), newLine, pos });
+    } else if (raw.startsWith("-")) {
+      oldLine++;
+      result.push({ type: "del", content: raw.slice(1), oldLine, pos });
+    } else if (raw.startsWith("\\")) {
+      result.push({ type: "meta", content: raw, pos });
+    } else if (raw !== "") {
+      oldLine++;
+      newLine++;
+      result.push({
+        type: "ctx",
+        content: raw.slice(1),
+        oldLine,
+        newLine,
+        pos,
+      });
     }
-    return result;
+  }
+  return result;
 }
 
 // ── Panel class ──────────────────────────────────────────────────────────────
 
 export class PRDetailPanel {
-    private static panels = new Map<number, PRDetailPanel>();
-    private readonly panel: vscode.WebviewPanel;
-    private disposables: vscode.Disposable[] = [];
+  private static panels = new Map<number, PRDetailPanel>();
+  private readonly panel: vscode.WebviewPanel;
+  private disposables: vscode.Disposable[] = [];
 
-    static async show(
-        extensionUri: vscode.Uri,
-        api: GiteaApiClient,
-        repoInfo: RepoInfo,
-        pr: GiteaPullRequest
-    ): Promise<void> {
-        const existing = PRDetailPanel.panels.get(pr.number);
-        if (existing) { existing.panel.reveal(vscode.ViewColumn.One); return; }
-        const panel = vscode.window.createWebviewPanel(
-            'giteaPRDetail',
-            `PR #${pr.number}: ${pr.title}`,
-            vscode.ViewColumn.One,
-            { enableScripts: true, retainContextWhenHidden: true }
+  static async show(
+    extensionUri: vscode.Uri,
+    api: GiteaApiClient,
+    repoInfo: RepoInfo,
+    pr: GiteaPullRequest,
+  ): Promise<void> {
+    const existing = PRDetailPanel.panels.get(pr.number);
+    if (existing) {
+      existing.panel.reveal(vscode.ViewColumn.One);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      "giteaPRDetail",
+      `PR #${pr.number}: ${pr.title}`,
+      vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
+    const instance = new PRDetailPanel(panel, extensionUri, api, repoInfo, pr);
+    PRDetailPanel.panels.set(pr.number, instance);
+    await instance.update(pr);
+  }
+
+  private constructor(
+    panel: vscode.WebviewPanel,
+    private readonly extensionUri: vscode.Uri,
+    private readonly api: GiteaApiClient,
+    private readonly repoInfo: RepoInfo,
+    private pr: GiteaPullRequest,
+  ) {
+    this.panel = panel;
+    panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    panel.webview.onDidReceiveMessage(
+      (msg) => this.handleMessage(msg),
+      null,
+      this.disposables,
+    );
+  }
+
+  private async handleMessage(msg: {
+    command: string;
+    [key: string]: unknown;
+  }): Promise<void> {
+    switch (msg.command) {
+      case "submitReview":
+        await this.submitReviewWithComments(
+          msg.event as "APPROVED" | "REQUEST_CHANGES" | "COMMENT",
+          (msg.body as string) ?? "",
+          (msg.comments as Array<{
+            path: string;
+            new_position: number;
+            old_position: number;
+            body: string;
+          }>) ?? [],
         );
-        const instance = new PRDetailPanel(panel, extensionUri, api, repoInfo, pr);
-        PRDetailPanel.panels.set(pr.number, instance);
-        await instance.update(pr);
+        break;
+      case "addComment":
+        await this.addPRComment((msg.body as string) ?? "");
+        break;
+      case "merge":
+        await this.merge(
+          (msg.method as "merge" | "rebase" | "squash") ?? "merge",
+        );
+        break;
+      case "closePR":
+        await this.setPRState("closed");
+        break;
+      case "reopenPR":
+        await this.setPRState("open");
+        break;
+      case "editTitle":
+        await this.editTitle((msg.title as string) ?? "");
+        break;
+      case "changeBase":
+        await this.changeBase();
+        break;
+      case "refresh":
+        this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
+        await this.update(this.pr);
+        break;
+      case "openInBrowser":
+        vscode.env.openExternal(vscode.Uri.parse(this.pr.html_url));
+        break;
+      case "checkout":
+        await vscode.commands.executeCommand(
+          "gitea.checkoutPR",
+          this.pr,
+          this.repoInfo,
+        );
+        break;
     }
+  }
 
-    private constructor(
-        panel: vscode.WebviewPanel,
-        private readonly extensionUri: vscode.Uri,
-        private readonly api: GiteaApiClient,
-        private readonly repoInfo: RepoInfo,
-        private pr: GiteaPullRequest
-    ) {
-        this.panel = panel;
-        panel.onDidDispose(() => this.dispose(), null, this.disposables);
-        panel.webview.onDidReceiveMessage(msg => this.handleMessage(msg), null, this.disposables);
-    }
-
-    private async handleMessage(msg: { command: string; [key: string]: unknown }): Promise<void> {
-        switch (msg.command) {
-            case 'submitReview':
-                await this.submitReviewWithComments(
-                    msg.event as 'APPROVED' | 'REQUEST_CHANGES' | 'COMMENT',
-                    msg.body as string ?? '',
-                    (msg.comments as Array<{ path: string; new_position: number; old_position: number; body: string }>) ?? []
-                );
-                break;
-            case 'addComment':
-                await this.addPRComment(msg.body as string ?? '');
-                break;
-            case 'merge':
-                await this.merge((msg.method as 'merge' | 'rebase' | 'squash') ?? 'merge');
-                break;
-            case 'closePR':
-                await this.setPRState('closed');
-                break;
-            case 'reopenPR':
-                await this.setPRState('open');
-                break;
-            case 'editTitle':
-                await this.editTitle(msg.title as string ?? '');
-                break;
-            case 'changeBase':
-                await this.changeBase();
-                break;
-            case 'refresh':
-                this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
-                await this.update(this.pr);
-                break;
-            case 'openInBrowser':
-                vscode.env.openExternal(vscode.Uri.parse(this.pr.html_url));
-                break;
-            case 'checkout':
-                await vscode.commands.executeCommand('gitea.checkoutPR', this.pr, this.repoInfo);
-                break;
-        }
-    }
-
-    private async setPRState(state: 'open' | 'closed'): Promise<void> {
-        try {
-            if (state === 'closed') {
-                const ok = await vscode.window.showWarningMessage(`Close PR #${this.pr.number}?`, { modal: true }, 'Confirm');
-                if (ok !== 'Confirm') { return; }
-                this.pr = await this.api.closePullRequest(this.repoInfo, this.pr.number);
-            } else {
-                this.pr = await this.api.reopenPullRequest(this.repoInfo, this.pr.number);
-            }
-            this.panel.title = `PR #${this.pr.number}: ${this.pr.title}`;
-            await this.update(this.pr);
-            vscode.window.showInformationMessage(`PR #${this.pr.number} ${state === 'closed' ? 'closed' : 're-opened'}.`);
-        } catch (err) { vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`); }
-    }
-
-    private async editTitle(currentTitle: string): Promise<void> {
-        const newTitle = await vscode.window.showInputBox({ prompt: 'New PR title', value: currentTitle, ignoreFocusOut: true });
-        if (!newTitle || newTitle === currentTitle) { return; }
-        try {
-            this.pr = await this.api.updatePullRequest(this.repoInfo, this.pr.number, { title: newTitle });
-            this.panel.title = `PR #${this.pr.number}: ${this.pr.title}`;
-            await this.update(this.pr);
-        } catch (err) { vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`); }
-    }
-
-    private async changeBase(): Promise<void> {
-        let branches: string[] = [];
-        try { branches = await this.api.listBranches(this.repoInfo); } catch { /* ignored */ }
-        const pick = branches.length > 0
-            ? await vscode.window.showQuickPick(branches, { placeHolder: `Current base: ${this.pr.base.ref}`, ignoreFocusOut: true })
-            : await vscode.window.showInputBox({ prompt: 'New base branch', value: this.pr.base.ref, ignoreFocusOut: true });
-        if (!pick || pick === this.pr.base.ref) { return; }
-        try {
-            this.pr = await this.api.updatePullRequest(this.repoInfo, this.pr.number, { base: pick });
-            await this.update(this.pr);
-            vscode.window.showInformationMessage(`Base changed to "${pick}".`);
-        } catch (err) { vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`); }
-    }
-
-    private async submitReviewWithComments(
-        event: 'APPROVED' | 'REQUEST_CHANGES' | 'COMMENT',
-        body: string,
-        comments: Array<{ path: string; new_position: number; old_position: number; body: string }>
-    ): Promise<void> {
-        try {
-            await this.api.createReview(this.repoInfo, this.pr.number, event, body, comments);
-            const label = event === 'APPROVED' ? 'Approved' : event === 'REQUEST_CHANGES' ? 'Changes Requested' : 'Commented';
-            vscode.window.showInformationMessage(`Review submitted: ${label}${comments.length ? ` with ${comments.length} inline comment(s)` : ''}`);
-            this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
-            await this.update(this.pr);
-        } catch (err) { vscode.window.showErrorMessage(`Failed to submit review: ${(err as Error).message}`); }
-    }
-
-    private async addPRComment(body: string): Promise<void> {
-        if (!body.trim()) { return; }
-        try {
-            await this.api.addPRComment(this.repoInfo, this.pr.number, body);
-            this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
-            await this.update(this.pr);
-        } catch (err) { vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`); }
-    }
-
-    private async merge(method: 'merge' | 'rebase' | 'squash'): Promise<void> {
+  private async setPRState(state: "open" | "closed"): Promise<void> {
+    try {
+      if (state === "closed") {
         const ok = await vscode.window.showWarningMessage(
-            `Merge PR #${this.pr.number} using "${method}"?`, { modal: true }, 'Confirm'
+          `Close PR #${this.pr.number}?`,
+          { modal: true },
+          "Confirm",
         );
-        if (ok !== 'Confirm') { return; }
-        try {
-            await this.api.mergePullRequest(this.repoInfo, this.pr.number, method);
-            vscode.window.showInformationMessage(`PR #${this.pr.number} merged.`);
-            this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
-            await this.update(this.pr);
-        } catch (err) { vscode.window.showErrorMessage(`Failed to merge: ${(err as Error).message}`); }
+        if (ok !== "Confirm") {
+          return;
+        }
+        this.pr = await this.api.closePullRequest(
+          this.repoInfo,
+          this.pr.number,
+        );
+      } else {
+        this.pr = await this.api.reopenPullRequest(
+          this.repoInfo,
+          this.pr.number,
+        );
+      }
+      this.panel.title = `PR #${this.pr.number}: ${this.pr.title}`;
+      await this.update(this.pr);
+      vscode.window.showInformationMessage(
+        `PR #${this.pr.number} ${state === "closed" ? "closed" : "re-opened"}.`,
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async editTitle(currentTitle: string): Promise<void> {
+    const newTitle = await vscode.window.showInputBox({
+      prompt: "New PR title",
+      value: currentTitle,
+      ignoreFocusOut: true,
+    });
+    if (!newTitle || newTitle === currentTitle) {
+      return;
+    }
+    try {
+      this.pr = await this.api.updatePullRequest(
+        this.repoInfo,
+        this.pr.number,
+        { title: newTitle },
+      );
+      this.panel.title = `PR #${this.pr.number}: ${this.pr.title}`;
+      await this.update(this.pr);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async changeBase(): Promise<void> {
+    let branches: string[] = [];
+    try {
+      branches = await this.api.listBranches(this.repoInfo);
+    } catch {
+      /* ignored */
+    }
+    const pick =
+      branches.length > 0
+        ? await vscode.window.showQuickPick(branches, {
+            placeHolder: `Current base: ${this.pr.base.ref}`,
+            ignoreFocusOut: true,
+          })
+        : await vscode.window.showInputBox({
+            prompt: "New base branch",
+            value: this.pr.base.ref,
+            ignoreFocusOut: true,
+          });
+    if (!pick || pick === this.pr.base.ref) {
+      return;
+    }
+    try {
+      this.pr = await this.api.updatePullRequest(
+        this.repoInfo,
+        this.pr.number,
+        { base: pick },
+      );
+      await this.update(this.pr);
+      vscode.window.showInformationMessage(`Base changed to "${pick}".`);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async submitReviewWithComments(
+    event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT",
+    body: string,
+    comments: Array<{
+      path: string;
+      new_position: number;
+      old_position: number;
+      body: string;
+    }>,
+  ): Promise<void> {
+    try {
+      await this.api.createReview(
+        this.repoInfo,
+        this.pr.number,
+        event,
+        body,
+        comments,
+      );
+      const label =
+        event === "APPROVED"
+          ? "Approved"
+          : event === "REQUEST_CHANGES"
+            ? "Changes Requested"
+            : "Commented";
+      vscode.window.showInformationMessage(
+        `Review submitted: ${label}${comments.length ? ` with ${comments.length} inline comment(s)` : ""}`,
+      );
+      this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
+      await this.update(this.pr);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Failed to submit review: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private async addPRComment(body: string): Promise<void> {
+    if (!body.trim()) {
+      return;
+    }
+    try {
+      await this.api.addPRComment(this.repoInfo, this.pr.number, body);
+      this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
+      await this.update(this.pr);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async merge(method: "merge" | "rebase" | "squash"): Promise<void> {
+    const ok = await vscode.window.showWarningMessage(
+      `Merge PR #${this.pr.number} using "${method}"?`,
+      { modal: true },
+      "Confirm",
+    );
+    if (ok !== "Confirm") {
+      return;
+    }
+    try {
+      await this.api.mergePullRequest(this.repoInfo, this.pr.number, method);
+      vscode.window.showInformationMessage(`PR #${this.pr.number} merged.`);
+      this.pr = await this.api.getPullRequest(this.repoInfo, this.pr.number);
+      await this.update(this.pr);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Failed to merge: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  async update(pr: GiteaPullRequest): Promise<void> {
+    this.panel.webview.postMessage({ command: "loading" });
+    try {
+      // Fetch all data in parallel; raw diff may fail gracefully
+      const [comments, reviews, files, commits, reviewComments, rawDiff] =
+        await Promise.all([
+          this.api.listPRComments(this.repoInfo, pr.number),
+          this.api.listReviews(this.repoInfo, pr.number),
+          this.api.listPRFiles(this.repoInfo, pr.number),
+          this.api.listPRCommits(this.repoInfo, pr.number),
+          this.api
+            .listAllPRReviewComments(this.repoInfo, pr.number)
+            .catch(() => [] as GiteaReviewComment[]),
+          this.api.getPRRawDiff(this.repoInfo, pr.number).catch(() => ""),
+        ]);
+
+      // Merge patch data from raw diff into file list (more reliable than the /files endpoint)
+      const patchMap = parseRawDiff(rawDiff);
+      const enrichedFiles = files.map((f) => ({
+        ...f,
+        patch: patchMap.get(f.filename) ?? f.patch ?? "",
+      }));
+
+      this.panel.webview.html = this.renderHtml(
+        pr,
+        comments,
+        reviews,
+        enrichedFiles,
+        commits,
+        reviewComments,
+      );
+    } catch (err) {
+      this.panel.webview.html = `<!DOCTYPE html><html><body style="padding:20px;color:var(--vscode-foreground,#ccc);background:var(--vscode-editor-background,#1e1e1e)"><h2>Error loading PR</h2><p>${escHtml((err as Error).message)}</p></body></html>`;
+    }
+  }
+
+  private buildDiffRows(
+    patch: string,
+    fi: number,
+    filename: string,
+    reviewComments: GiteaReviewComment[],
+  ): string {
+    const lines = parsePatch(patch);
+    if (lines.length === 0) {
+      return `<tr><td colspan="3" class="empty-diff">No diff available (binary file or content unchanged)</td></tr>`;
     }
 
-    async update(pr: GiteaPullRequest): Promise<void> {
-        this.panel.webview.postMessage({ command: 'loading' });
-        try {
-            // Fetch all data in parallel; raw diff may fail gracefully
-            const [comments, reviews, files, commits, reviewComments, rawDiff] = await Promise.all([
-                this.api.listPRComments(this.repoInfo, pr.number),
-                this.api.listReviews(this.repoInfo, pr.number),
-                this.api.listPRFiles(this.repoInfo, pr.number),
-                this.api.listPRCommits(this.repoInfo, pr.number),
-                this.api.listAllPRReviewComments(this.repoInfo, pr.number).catch(() => [] as GiteaReviewComment[]),
-                this.api.getPRRawDiff(this.repoInfo, pr.number).catch(() => '')
-            ]);
-
-            // Merge patch data from raw diff into file list (more reliable than the /files endpoint)
-            const patchMap = parseRawDiff(rawDiff);
-            const enrichedFiles = files.map(f => ({
-                ...f,
-                patch: patchMap.get(f.filename) ?? f.patch ?? ''
-            }));
-
-            this.panel.webview.html = this.renderHtml(pr, comments, reviews, enrichedFiles, commits, reviewComments);
-        } catch (err) {
-            this.panel.webview.html = `<!DOCTYPE html><html><body style="padding:20px;color:var(--vscode-foreground,#ccc);background:var(--vscode-editor-background,#1e1e1e)"><h2>Error loading PR</h2><p>${escHtml((err as Error).message)}</p></body></html>`;
-        }
+    // Group existing review comments by new_position:old_position
+    const rcMap = new Map<string, GiteaReviewComment[]>();
+    for (const c of reviewComments.filter((r) => r.path === filename)) {
+      const key = `${c.new_position ?? 0}:${c.old_position ?? 0}`;
+      rcMap.set(key, [...(rcMap.get(key) ?? []), c]);
     }
 
-    private buildDiffRows(patch: string, fi: number, filename: string, reviewComments: GiteaReviewComment[]): string {
-        const lines = parsePatch(patch);
-        if (lines.length === 0) {
-            return `<tr><td colspan="3" class="empty-diff">No diff available (binary file or content unchanged)</td></tr>`;
-        }
+    let rows = "";
+    for (const ln of lines) {
+      const rowCls =
+        ln.type === "add"
+          ? "diff-add"
+          : ln.type === "del"
+            ? "diff-del"
+            : ln.type === "hunk"
+              ? "diff-hunk"
+              : "diff-ctx";
+      const isClickable =
+        ln.type === "add" || ln.type === "del" || ln.type === "ctx";
+      const oldNum = ln.oldLine != null ? String(ln.oldLine) : "";
+      const newNum = ln.newLine != null ? String(ln.newLine) : "";
+      const prefix =
+        ln.type === "add"
+          ? "+"
+          : ln.type === "del"
+            ? "-"
+            : ln.type === "hunk"
+              ? ""
+              : "\u00a0";
+      const displayContent =
+        ln.type === "hunk"
+          ? escHtml(ln.content)
+          : escHtml(prefix) + escHtml(ln.content);
+      const lineKey = `cf-${fi}-${ln.pos}`;
 
-        // Group existing review comments by new_position:old_position
-        const rcMap = new Map<string, GiteaReviewComment[]>();
-        for (const c of reviewComments.filter(r => r.path === filename)) {
-            const key = `${c.new_position ?? 0}:${c.old_position ?? 0}`;
-            rcMap.set(key, [...(rcMap.get(key) ?? []), c]);
-        }
+      if (isClickable) {
+        const data = `data-fi="${fi}" data-pos="${ln.pos}" data-path="${escHtml(filename)}" data-nl="${ln.newLine ?? 0}" data-ol="${ln.oldLine ?? 0}"`;
+        rows +=
+          `<tr class="${rowCls} clickable-line" onclick="clickLine(this)" title="Click to add inline comment" ${data}>` +
+          `<td class="ln ln-add-btn"><span class="add-line-btn">+</span>${oldNum}</td>` +
+          `<td class="ln">${newNum}</td>` +
+          `<td class="lc"><pre>${displayContent}</pre></td></tr>`;
+        rows +=
+          `<tr class="cf-row" id="${lineKey}" data-path="${escHtml(filename)}" data-nl="${ln.newLine ?? 0}" data-ol="${ln.oldLine ?? 0}" style="display:none">` +
+          `<td colspan="3"><div class="cf-inner">` +
+          `<textarea class="cf-ta" placeholder="Leave a review comment on this line..."></textarea>` +
+          `<div class="cf-acts"><button class="btn" onclick="addInlineComment(this)">Add Review Comment</button>` +
+          `<button class="btn sec" onclick="cancelLine(this)">Cancel</button></div>` +
+          `</div></td></tr>`;
+      } else {
+        rows +=
+          `<tr class="${rowCls}">` +
+          `<td class="ln">${oldNum}</td><td class="ln">${newNum}</td>` +
+          `<td class="lc"><pre>${displayContent}</pre></td></tr>`;
+      }
 
-        let rows = '';
-        for (const ln of lines) {
-            const rowCls = ln.type === 'add' ? 'diff-add' : ln.type === 'del' ? 'diff-del' : ln.type === 'hunk' ? 'diff-hunk' : 'diff-ctx';
-            const isClickable = ln.type === 'add' || ln.type === 'del' || ln.type === 'ctx';
-            const oldNum = ln.oldLine != null ? String(ln.oldLine) : '';
-            const newNum = ln.newLine != null ? String(ln.newLine) : '';
-            const prefix = ln.type === 'add' ? '+' : ln.type === 'del' ? '-' : ln.type === 'hunk' ? '' : '\u00a0';
-            const displayContent = ln.type === 'hunk' ? escHtml(ln.content) : escHtml(prefix) + escHtml(ln.content);
-            const lineKey = `cf-${fi}-${ln.pos}`;
-
-            if (isClickable) {
-                const data = `data-fi="${fi}" data-pos="${ln.pos}" data-path="${escHtml(filename)}" data-nl="${ln.newLine ?? 0}" data-ol="${ln.oldLine ?? 0}"`;
-                rows += `<tr class="${rowCls} clickable-line" onclick="clickLine(this)" title="Click to add inline comment" ${data}>` +
-                    `<td class="ln ln-add-btn"><span class="add-line-btn">+</span>${oldNum}</td>` +
-                    `<td class="ln">${newNum}</td>` +
-                    `<td class="lc"><pre>${displayContent}</pre></td></tr>`;
-                rows += `<tr class="cf-row" id="${lineKey}" data-path="${escHtml(filename)}" data-nl="${ln.newLine ?? 0}" data-ol="${ln.oldLine ?? 0}" style="display:none">` +
-                    `<td colspan="3"><div class="cf-inner">` +
-                    `<textarea class="cf-ta" placeholder="Leave a review comment on this line..."></textarea>` +
-                    `<div class="cf-acts"><button class="btn" onclick="addInlineComment(this)">Add Review Comment</button>` +
-                    `<button class="btn sec" onclick="cancelLine(this)">Cancel</button></div>` +
-                    `</div></td></tr>`;
-            } else {
-                rows += `<tr class="${rowCls}">` +
-                    `<td class="ln">${oldNum}</td><td class="ln">${newNum}</td>` +
-                    `<td class="lc"><pre>${displayContent}</pre></td></tr>`;
-            }
-
-            // Existing review comments inline
-            const rcKey = `${ln.newLine ?? 0}:${ln.oldLine ?? 0}`;
-            for (const c of (rcMap.get(rcKey) ?? [])) {
-                rows += `<tr class="rc-row"><td colspan="3"><div class="rc">` +
-                    `<div class="rc-hdr"><strong>${escHtml(c.user.login)}</strong>` +
-                    `<span class="dim ml8">${new Date(c.created_at).toLocaleString()}</span></div>` +
-                    `<div class="rc-body">${escHtml(c.body)}</div></div></td></tr>`;
-            }
-        }
-        return rows;
+      // Existing review comments inline
+      const rcKey = `${ln.newLine ?? 0}:${ln.oldLine ?? 0}`;
+      for (const c of rcMap.get(rcKey) ?? []) {
+        rows +=
+          `<tr class="rc-row"><td colspan="3"><div class="rc">` +
+          `<div class="rc-hdr"><strong>${escHtml(c.user.login)}</strong>` +
+          `<span class="dim ml8">${new Date(c.created_at).toLocaleString()}</span></div>` +
+          `<div class="rc-body">${escHtml(c.body)}</div></div></td></tr>`;
+      }
     }
+    return rows;
+  }
 
-    private renderHtml(
-        pr: GiteaPullRequest,
-        comments: GiteaComment[],
-        reviews: GiteaReview[],
-        files: (GiteaFileDiff & { patch: string })[],
-        commits: GiteaCommit[],
-        reviewComments: GiteaReviewComment[]
-    ): string {
-        const isOpen = pr.state === 'open' && !pr.merged;
-        const stateBg = pr.merged ? '#6f42c1' : isOpen ? '#2da44e' : '#cf222e';
-        const stateLabel = pr.merged ? 'Merged' : isOpen ? 'Open' : 'Closed';
+  private renderHtml(
+    pr: GiteaPullRequest,
+    comments: GiteaComment[],
+    reviews: GiteaReview[],
+    files: (GiteaFileDiff & { patch: string })[],
+    commits: GiteaCommit[],
+    reviewComments: GiteaReviewComment[],
+  ): string {
+    const isOpen = pr.state === "open" && !pr.merged;
+    const stateBg = pr.merged ? "#6f42c1" : isOpen ? "#2da44e" : "#cf222e";
+    const stateLabel = pr.merged ? "Merged" : isOpen ? "Open" : "Closed";
 
-        const labelsHtml = pr.labels?.length
-            ? pr.labels.map(l => `<span class="label" style="background:#${l.color}">${escHtml(l.name)}</span>`).join(' ')
-            : '';
-        const assigneesHtml = pr.assignees?.length
-            ? `<span class="mi">👤 ${pr.assignees.map(a => escHtml(a.login)).join(', ')}</span>`
-            : pr.assignee ? `<span class="mi">👤 ${escHtml(pr.assignee.login)}</span>` : '';
-        const milestoneHtml = pr.milestone ? `<span class="mi">🏁 ${escHtml(pr.milestone.title)}</span>` : '';
+    const labelsHtml = pr.labels?.length
+      ? pr.labels
+          .map(
+            (l) =>
+              `<span class="label" style="background:#${l.color}">${escHtml(l.name)}</span>`,
+          )
+          .join(" ")
+      : "";
+    const assigneesHtml = pr.assignees?.length
+      ? `<span class="mi">👤 ${pr.assignees.map((a) => escHtml(a.login)).join(", ")}</span>`
+      : pr.assignee
+        ? `<span class="mi">👤 ${escHtml(pr.assignee.login)}</span>`
+        : "";
+    const milestoneHtml = pr.milestone
+      ? `<span class="mi">🏁 ${escHtml(pr.milestone.title)}</span>`
+      : "";
 
-        const commentsHtml = comments.length === 0
-            ? '<p class="empty">No comments yet.</p>'
-            : comments.map(c => `<div class="comment">` +
+    const commentsHtml =
+      comments.length === 0
+        ? '<p class="empty">No comments yet.</p>'
+        : comments
+            .map(
+              (c) =>
+                `<div class="comment">` +
                 `<div class="comment-hdr"><img src="${escHtml(c.user.avatar_url)}" class="avatar" alt="">` +
                 `<strong>${escHtml(c.user.login)}</strong>` +
                 `<span class="time">${new Date(c.created_at).toLocaleString()}</span></div>` +
-                `<div class="comment-body">${escHtml(c.body)}</div></div>`).join('');
+                `<div class="comment-body">${escHtml(c.body)}</div></div>`,
+            )
+            .join("");
 
-        const reviewsHtml = reviews.length === 0
-            ? '<p class="empty">No reviews yet.</p>'
-            : reviews.map(r => `<div class="review review-${r.state.toLowerCase()}">` +
+    const reviewsHtml =
+      reviews.length === 0
+        ? '<p class="empty">No reviews yet.</p>'
+        : reviews
+            .map(
+              (r) =>
+                `<div class="review review-${r.state.toLowerCase()}">` +
                 `<div class="review-hdr"><strong>${escHtml(r.user.login)}</strong>&nbsp;` +
-                `<span class="badge badge-${r.state.toLowerCase()}">${escHtml(r.state.replace('_', ' '))}</span>` +
+                `<span class="badge badge-${r.state.toLowerCase()}">${escHtml(r.state.replace("_", " "))}</span>` +
                 `<span class="dim ml8">${new Date(r.submitted_at).toLocaleString()}</span></div>` +
-                (r.body?.trim() ? `<p class="review-body">${escHtml(r.body)}</p>` : '') +
-                `</div>`).join('');
+                (r.body?.trim()
+                  ? `<p class="review-body">${escHtml(r.body)}</p>`
+                  : "") +
+                `</div>`,
+            )
+            .join("");
 
-        // Build files HTML — all collapsed initially, diff pre-embedded as data
-        const stColors: Record<string, string> = { added: '#2da44e', deleted: '#cf222e', modified: '#d97706', renamed: '#0969da', changed: '#d97706' };
+    // Build files HTML — all collapsed initially, diff pre-embedded as data
+    const stColors: Record<string, string> = {
+      added: "#2da44e",
+      deleted: "#cf222e",
+      modified: "#d97706",
+      renamed: "#0969da",
+      changed: "#d97706",
+    };
 
-        const filesHtml = files.map((f, fi) => {
-            const stColor = stColors[f.status] ?? '#888';
-            const diffRows = this.buildDiffRows(f.patch, fi, f.filename, reviewComments);
-            const fileLabel = f.filename.split('/').pop() ?? f.filename;
-            const fileDir = f.filename.includes('/') ? f.filename.slice(0, f.filename.lastIndexOf('/') + 1) : '';
-            return `<div class="file-block" id="fb-${fi}">` +
-                `<div class="file-header" onclick="toggleFile(${fi}, event)">` +
-                `<input type="checkbox" class="viewed-cb" id="vc-${fi}" title="Mark as viewed"` +
-                ` onchange="markViewed(${fi},this.checked)" onclick="event.stopPropagation()">` +
-                `<span class="fsb" style="background:${stColor}">${f.status[0].toUpperCase()}</span>` +
-                `<span class="file-path"><span class="file-dir">${escHtml(fileDir)}</span><span class="file-name">${escHtml(fileLabel)}</span></span>` +
-                `<span class="fst ml-auto"><span class="add-s">+${f.additions}</span>&nbsp;<span class="del-s">-${f.deletions}</span></span>` +
-                `<span class="viewed-badge">Viewed ✓</span>` +
-                `<span class="toggle-icon" id="ti-${fi}">▶</span>` +
-                `</div>` +
-                `<div class="fdw" id="fd-${fi}" style="display:none">` +
-                `<table class="diff-table"><tbody>${diffRows}</tbody></table></div></div>`;
-        }).join('');
+    const filesHtml = files
+      .map((f, fi) => {
+        const stColor = stColors[f.status] ?? "#888";
+        const diffRows = this.buildDiffRows(
+          f.patch,
+          fi,
+          f.filename,
+          reviewComments,
+        );
+        const fileLabel = f.filename.split("/").pop() ?? f.filename;
+        const fileDir = f.filename.includes("/")
+          ? f.filename.slice(0, f.filename.lastIndexOf("/") + 1)
+          : "";
+        return (
+          `<div class="file-block" id="fb-${fi}">` +
+          `<div class="file-header" onclick="toggleFile(${fi}, event)">` +
+          `<input type="checkbox" class="viewed-cb" id="vc-${fi}" title="Mark as viewed"` +
+          ` onchange="markViewed(${fi},this.checked)" onclick="event.stopPropagation()">` +
+          `<span class="fsb" style="background:${stColor}">${f.status[0].toUpperCase()}</span>` +
+          `<span class="file-path"><span class="file-dir">${escHtml(fileDir)}</span><span class="file-name">${escHtml(fileLabel)}</span></span>` +
+          `<span class="fst ml-auto"><span class="add-s">+${f.additions}</span>&nbsp;<span class="del-s">-${f.deletions}</span></span>` +
+          `<span class="viewed-badge">Viewed ✓</span>` +
+          `<span class="toggle-icon" id="ti-${fi}">▶</span>` +
+          `</div>` +
+          `<div class="fdw" id="fd-${fi}" style="display:none">` +
+          `<table class="diff-table"><tbody>${diffRows}</tbody></table></div></div>`
+        );
+      })
+      .join("");
 
-        const commitsHtml = commits.length === 0
-            ? '<p class="empty">No commits.</p>'
-            : commits.map(c => `<div class="commit-entry">` +
+    const commitsHtml =
+      commits.length === 0
+        ? '<p class="empty">No commits.</p>'
+        : commits
+            .map(
+              (c) =>
+                `<div class="commit-entry">` +
                 `<code class="sha">${escHtml(c.sha.slice(0, 8))}</code>` +
-                `<span class="commit-msg">${escHtml(c.commit.message.split('\n')[0])}</span>` +
-                `<span class="dim">${escHtml(c.commit.author.name)}</span></div>`).join('');
+                `<span class="commit-msg">${escHtml(c.commit.message.split("\n")[0])}</span>` +
+                `<span class="dim">${escHtml(c.commit.author.name)}</span></div>`,
+            )
+            .join("");
 
-        const titleJson = JSON.stringify(pr.title);
+    const titleJson = JSON.stringify(pr.title);
 
-        return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -520,24 +726,32 @@ td.lc pre{margin:0;padding:0;font-family:inherit;font-size:inherit;white-space:p
   <span class="branch-tag">${escHtml(pr.head.ref)}</span>
 </div>
 
-${(pr.commits != null || pr.additions != null) ? `<div class="stats-row">
-  ${pr.commits != null ? `<div class="stat"><span class="stat-lbl">Commits</span><span class="stat-val">${pr.commits}</span></div>` : ''}
-  ${pr.additions != null ? `<div class="stat"><span class="stat-lbl">Additions</span><span class="stat-val" style="color:#2da44e">+${pr.additions}</span></div>` : ''}
-  ${pr.deletions != null ? `<div class="stat"><span class="stat-lbl">Deletions</span><span class="stat-val" style="color:#cf222e">-${pr.deletions}</span></div>` : ''}
-  ${pr.changed_files != null ? `<div class="stat"><span class="stat-lbl">Files</span><span class="stat-val">${pr.changed_files}</span></div>` : ''}
-</div>` : ''}
+${
+  pr.commits != null || pr.additions != null
+    ? `<div class="stats-row">
+  ${pr.commits != null ? `<div class="stat"><span class="stat-lbl">Commits</span><span class="stat-val">${pr.commits}</span></div>` : ""}
+  ${pr.additions != null ? `<div class="stat"><span class="stat-lbl">Additions</span><span class="stat-val" style="color:#2da44e">+${pr.additions}</span></div>` : ""}
+  ${pr.deletions != null ? `<div class="stat"><span class="stat-lbl">Deletions</span><span class="stat-val" style="color:#cf222e">-${pr.deletions}</span></div>` : ""}
+  ${pr.changed_files != null ? `<div class="stat"><span class="stat-lbl">Files</span><span class="stat-val">${pr.changed_files}</span></div>` : ""}
+</div>`
+    : ""
+}
 
 <div class="actions">
   <button class="btn" onclick="post('openInBrowser')">🔗 Open in Browser</button>
   <button class="btn sec" onclick="post('checkout')">⎇ Checkout Branch</button>
   <button class="btn sec" onclick="post('refresh')">↺ Refresh</button>
-  ${isOpen ? `<select id="mergeMethod"><option value="merge">Merge commit</option><option value="rebase">Rebase</option><option value="squash">Squash</option></select>
+  ${
+    isOpen
+      ? `<select id="mergeMethod"><option value="merge">Merge commit</option><option value="rebase">Rebase</option><option value="squash">Squash</option></select>
   <button class="btn success" onclick="post('merge',{method:document.getElementById('mergeMethod').value})">↑ Merge PR</button>
-  <button class="btn danger" onclick="post('closePR')">✕ Close PR</button>` : ''}
-  ${pr.state === 'closed' && !pr.merged ? `<button class="btn success" onclick="post('reopenPR')">↺ Re-open</button>` : ''}
+  <button class="btn danger" onclick="post('closePR')">✕ Close PR</button>`
+      : ""
+  }
+  ${pr.state === "closed" && !pr.merged ? `<button class="btn success" onclick="post('reopenPR')">↺ Re-open</button>` : ""}
 </div>
 
-${pr.body?.trim() ? `<div class="desc-body">${escHtml(pr.body)}</div>` : ''}
+${pr.body?.trim() ? `<div class="desc-body">${escHtml(pr.body)}</div>` : ""}
 
 <div class="tabs">
   <button class="tab active" onclick="showTab('comments',this)">💬 Comments (${comments.length})</button>
@@ -562,8 +776,12 @@ ${pr.body?.trim() ? `<div class="desc-body">${escHtml(pr.body)}</div>` : ''}
     <div class="rsb-title">Submit Review <span id="pc-count"></span></div>
     <textarea id="rv-body" style="height:60px" placeholder="Overall review comment (optional)..."></textarea>
     <div class="rsb-acts">
-      ${isOpen ? `<button class="btn success" onclick="submitReview('APPROVED')">✅ Approve</button>
-      <button class="btn danger" onclick="submitReview('REQUEST_CHANGES')">⚠️ Request Changes</button>` : ''}
+      ${
+        isOpen
+          ? `<button class="btn success" onclick="submitReview('APPROVED')">✅ Approve</button>
+      <button class="btn danger" onclick="submitReview('REQUEST_CHANGES')">⚠️ Request Changes</button>`
+          : ""
+      }
       <button class="btn sec" onclick="submitReview('COMMENT')">💬 Comment Only</button>
     </div>
   </div>
@@ -674,21 +892,23 @@ window.addEventListener('message', ev => {
 </script>
 </body>
 </html>`;
-    }
+  }
 
-    dispose(): void {
-        PRDetailPanel.panels.delete(this.pr.number);
-        this.panel.dispose();
-        for (const d of this.disposables) { d.dispose(); }
-        this.disposables = [];
+  dispose(): void {
+    PRDetailPanel.panels.delete(this.pr.number);
+    this.panel.dispose();
+    for (const d of this.disposables) {
+      d.dispose();
     }
+    this.disposables = [];
+  }
 }
 
 function escHtml(s: string): string {
-    return String(s ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

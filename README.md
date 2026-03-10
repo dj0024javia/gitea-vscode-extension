@@ -4,6 +4,22 @@ A VS Code extension that brings your [Gitea](https://gitea.io) repositories dire
 
 ---
 
+## Screenshots
+
+**Pull Request detail — review, merge, close, change base:**
+
+![PR Detail Panel](resources/screenshots/screenshot-pr-detail.png)
+
+**Issue tracking — browse, create, comment, close:**
+
+![Issue Detail Panel](resources/screenshots/screenshot-issue-detail.png)
+
+**CI / Actions — live run status and job logs:**
+
+![CI Actions Panel](resources/screenshots/screenshot-ci-panel.png)
+
+---
+
 ## Features
 
 | Feature                | Description                                                                                                                |

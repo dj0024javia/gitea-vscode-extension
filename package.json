@@ -2,7 +2,7 @@
   "name": "gitea-vscode-pullrequest",
   "displayName": "Gitea for VS Code",
   "description": "Pull requests, CI/Actions, and repository management for self-hosted Gitea",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "dj0024javia",
   "repository": { "type": "git", "url": "https://github.com/dj0024javia/gitea-vscode-extension" },
   "bugs": { "url": "https://github.com/dj0024javia/gitea-vscode-extension/issues" },

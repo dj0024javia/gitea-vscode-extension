@@ -1,5 +1,9 @@
 # Gitea for VS Code
 
+[![CI](https://github.com/dj0024javia/gitea-vscode-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/dj0024javia/gitea-vscode-extension/actions/workflows/ci.yml)
+[![Release](https://github.com/dj0024javia/gitea-vscode-extension/actions/workflows/release.yml/badge.svg)](https://github.com/dj0024javia/gitea-vscode-extension/actions/workflows/release.yml)
+[![Version](https://img.shields.io/github/v/release/dj0024javia/gitea-vscode-extension)](https://github.com/dj0024javia/gitea-vscode-extension/releases)
+
 A VS Code extension that brings your [Gitea](https://gitea.io) repositories directly into your editor — pull requests, issues, CI/Actions, inline code review, and more.
 
 ---
@@ -46,6 +50,15 @@ A VS Code extension that brings your [Gitea](https://gitea.io) repositories dire
 ---
 
 ## Installation
+
+### From VS Code Marketplace (Recommended)
+
+1. Open VS Code
+2. Press `Ctrl+Shift+X` (or `Cmd+Shift+X` on Mac) to open Extensions
+3. Search for **"Gitea"**
+4. Click **Install** on "Gitea for VS Code"
+
+Or install directly from the [marketplace page](https://marketplace.visualstudio.com/items?itemName=dj0024javia.gitea-vscode-pullrequest).
 
 ### From VSIX (manual)
 

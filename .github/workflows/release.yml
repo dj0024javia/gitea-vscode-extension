@@ -1,0 +1,64 @@
+name: Release Extension
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write  # Required to upload assets to release
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Compile TypeScript
+        run: npm run compile
+      
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+      
+      - name: Package extension
+        run: vsce package --no-dependencies
+      
+      - name: Get package version
+        id: package-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      
+      - name: Upload VSIX to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "*.vsix"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Publish to VS Code Marketplace
+        if: env.AZURE_TOKEN != ''
+        run: vsce publish -p $AZURE_TOKEN
+        env:
+          AZURE_TOKEN: ${{ secrets.AZURE_TOKEN }}
+      
+      - name: Summary
+        run: |
+          echo "## 🎉 Extension Released!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Version: **v${{ steps.package-version.outputs.version }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ VSIX file uploaded to release" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ secrets.AZURE_TOKEN }}" ]; then
+            echo "✅ Published to VS Code Marketplace" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ Skipped marketplace publish (AZURE_TOKEN not configured)" >> $GITHUB_STEP_SUMMARY
+          fi

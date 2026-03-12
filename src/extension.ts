@@ -27,6 +27,7 @@ export async function activate(
     vscode.window.registerTreeDataProvider("gitea.pullRequests", prProvider),
     vscode.window.registerTreeDataProvider("gitea.ciRuns", ciProvider),
     vscode.window.registerTreeDataProvider("gitea.issues", issuesProvider),
+    ciProvider, // Register for disposal
     statusBar,
   );
 

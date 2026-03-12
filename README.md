@@ -18,6 +18,10 @@ A VS Code extension that brings your [Gitea](https://gitea.io) repositories dire
 
 ![CI Actions Panel](resources/screenshots/screenshot-ci-panel.png)
 
+**Live log streaming with auto-scroll:**
+
+![Live Streaming Logs](resources/screenshots/screenshot-live-logs.png)
+
 ---
 
 ## Features
@@ -27,7 +31,7 @@ A VS Code extension that brings your [Gitea](https://gitea.io) repositories dire
 | **Pull Requests**      | Browse, filter, merge, close, re-open PRs across all repos and submodules                                                  |
 | **Inline Code Review** | GitHub-style diff viewer — click any line to comment, mark files as viewed, submit approve/request-changes/comment reviews |
 | **Issues**             | Browse open/closed issues, create, close, re-open, add comments                                                            |
-| **CI / Actions**       | See workflow runs and job statuses, re-run or cancel jobs, view logs                                                       |
+| **CI / Actions**       | See workflow runs and job statuses with live updates, re-run or cancel jobs, stream logs in real-time with auto-scroll    |
 | **Multi-repo**         | Automatically detects all git remotes and submodules in your VS Code workspace                                             |
 | **Status Bar**         | Shows active repo + auth state at a glance                                                                                 |
 
@@ -147,11 +151,17 @@ The **Issues** panel works similarly to PRs:
 
 ### CI / Actions
 
-The **CI / Actions** panel shows workflow runs per repository:
+The **CI / Actions** panel shows workflow runs per repository with **live status updates**:
 
-- Expand a run to see individual jobs
+- Workflow runs **auto-refresh every 5 seconds** when jobs are running (🔴 Live indicator)
+- Expand a run to see individual jobs with real-time status and duration
+- Click **📋 Logs** on any job to open the **live log streaming panel**:
+  - Logs stream in real-time with **auto-scroll to bottom**
+  - Status updates automatically (⏳ running → ✅ success/❌ failure)
+  - Scroll up to pause auto-scroll, scroll to bottom to resume
+  - Shows elapsed time for each job and step
 - Context menu → **Re-run Workflow** or **Cancel Run**
-- Context menu → **View Job Logs** opens the log output in a webview
+- Detail panel auto-refreshes every 3 seconds for running workflows
 
 ---
 

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { GiteaApiClient } from "../api/giteaApiClient";
 import { CIRunsProvider, CIRunItem, CIJobItem } from "../views/ciRunsProvider";
 import { CIDetailPanel } from "../views/ciDetailPanel";
+import { LiveLogPanel } from "../views/liveLogPanel";
 import type { GiteaWorkflowRun } from "../api/types";
 import type { RepoInfo } from "../context/repoManager";
 
@@ -74,7 +75,7 @@ export function registerCICommands(
           vscode.window.showWarningMessage("Select a job to view its logs.");
           return;
         }
-        await viewLogs(api, arg.repoInfo, arg.job.id, arg.job.name);
+        await LiveLogPanel.show(api, arg.repoInfo, arg.job);
       },
     ),
   );
@@ -142,37 +143,6 @@ async function cancelRun(
       } catch (err) {
         vscode.window.showErrorMessage(
           `Cancel failed: ${(err as Error).message}`,
-        );
-      }
-    },
-  );
-}
-
-async function viewLogs(
-  api: GiteaApiClient,
-  repoInfo: RepoInfo,
-  jobId: number,
-  jobName: string,
-): Promise<void> {
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `Loading logs for "${jobName}"...`,
-    },
-    async () => {
-      try {
-        const logs = await api.getJobLogs(repoInfo, jobId);
-        const doc = await vscode.workspace.openTextDocument({
-          content: logs,
-          language: "log",
-        });
-        await vscode.window.showTextDocument(doc, {
-          preview: true,
-          viewColumn: vscode.ViewColumn.Beside,
-        });
-      } catch (err) {
-        vscode.window.showErrorMessage(
-          `Failed to load logs: ${(err as Error).message}`,
         );
       }
     },

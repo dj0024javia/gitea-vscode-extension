@@ -54,8 +54,9 @@ export class RepoGroupItem extends vscode.TreeItem {
   ) {
     super(
       `${repoInfo.owner}/${repoInfo.repo}`,
-      vscode.TreeItemCollapsibleState.Expanded,
+      vscode.TreeItemCollapsibleState.Collapsed,
     );
+    this.id = `repo:${repoInfo.key}`;
     this.contextValue = "repoGroup";
     this.description = repoInfo.currentBranch
       ? `(${repoInfo.currentBranch})`
@@ -74,12 +75,19 @@ export class CIRunItem extends vscode.TreeItem {
       run.display_title || run.name || `Run #${run.run_number}`,
       vscode.TreeItemCollapsibleState.Collapsed,
     );
+    this.id = `run:${repoInfo.key}:${run.id}`;
     this.contextValue = "ciRun";
-    this.description = `${run.event} · ${run.head_branch}`;
+    const eventDesc = `${run.event} · ${run.head_branch}`;
+    const isRunning =
+      run.status === "running" ||
+      run.status === "waiting" ||
+      run.status === "pending";
+    this.description = isRunning ? `🔴 ${eventDesc}` : eventDesc;
     this.tooltip = new vscode.MarkdownString(
       `**${run.display_title || run.name}**\n\n` +
         `Status: \`${run.status}\` | Event: \`${run.event}\`\n\n` +
-        `Branch: \`${run.head_branch}\` · ${run.head_commit?.message ?? ""}`,
+        `Branch: \`${run.head_branch}\` · ${run.head_commit?.message ?? ""}` +
+        (isRunning ? "\n\n🔴 **Live**" : ""),
     );
     this.iconPath = iconForStatus(run.status);
   }
@@ -92,10 +100,13 @@ export class CIJobItem extends vscode.TreeItem {
     public readonly repoInfo: RepoInfo,
   ) {
     super(job.name, vscode.TreeItemCollapsibleState.Collapsed);
+    this.id = `job:${repoInfo.key}:${runId}:${job.id}`;
     this.contextValue = "ciJob";
-    this.description = job.conclusion || job.status;
-    this.iconPath = iconForStatus(job.conclusion || job.status);
-    this.tooltip = `${job.name} — ${job.status}${job.conclusion ? ` (${job.conclusion})` : ""}`;
+    const status = job.conclusion || job.status;
+    const isRunning = job.status === "running" || job.status === "waiting";
+    this.description = isRunning ? `🔴 ${status}` : status;
+    this.iconPath = iconForStatus(status);
+    this.tooltip = `${job.name} — ${status}${isRunning ? " (Live)" : ""}`;
   }
 }
 
@@ -122,7 +133,9 @@ export class CILoadMoreItem extends vscode.TreeItem {
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
-export class CIRunsProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+export class CIRunsProvider
+  implements vscode.TreeDataProvider<vscode.TreeItem>, vscode.Disposable
+{
   private _onDidChangeTreeData = new vscode.EventEmitter<
     vscode.TreeItem | undefined | null | void
   >();
@@ -130,6 +143,8 @@ export class CIRunsProvider implements vscode.TreeDataProvider<vscode.TreeItem> 
 
   private stateMap = new Map<string, RepoCIState>();
   private jobCache = new Map<number, GiteaWorkflowJob[]>();
+  private pollingTimer?: ReturnType<typeof setInterval>;
+  private isPolling = false;
 
   constructor(
     private readonly api: GiteaApiClient,
@@ -138,6 +153,7 @@ export class CIRunsProvider implements vscode.TreeDataProvider<vscode.TreeItem> 
   ) {
     repoManager.onDidChange(() => this.refresh());
     auth.onDidChangeSession(() => this.refresh());
+    this.startPolling();
   }
 
   refresh(): void {
@@ -296,6 +312,64 @@ export class CIRunsProvider implements vscode.TreeDataProvider<vscode.TreeItem> 
         `Failed to load jobs: ${(err as Error).message}`,
       );
       return [];
+    }
+  }
+
+  private startPolling(): void {
+    // Poll every 5 seconds to check for running jobs
+    this.pollingTimer = setInterval(() => {
+      this.pollRunningJobs();
+    }, 5000);
+  }
+
+  private async pollRunningJobs(): Promise<void> {
+    if (this.isPolling) {
+      return;
+    }
+
+    // Check if we have any running jobs
+    let hasRunningJobs = false;
+    for (const [_, state] of this.stateMap) {
+      if (
+        state.runs.some(
+          (r) => r.status === "running" || r.status === "waiting" || r.status === "pending",
+        )
+      ) {
+        hasRunningJobs = true;
+        break;
+      }
+    }
+
+    if (!hasRunningJobs) {
+      return;
+    }
+
+    // Refresh to get latest status
+    this.isPolling = true;
+    try {
+      // Refresh each repo that has running jobs
+      for (const [repoKey, state] of this.stateMap) {
+        const hasRunning = state.runs.some(
+          (r) => r.status === "running" || r.status === "waiting" || r.status === "pending",
+        );
+        if (hasRunning) {
+          const repoInfo = this.repoManager
+            .getRepos()
+            .find((r) => r.key === repoKey);
+          if (repoInfo) {
+            await this.fetchForRepo(repoInfo, state);
+          }
+        }
+      }
+    } finally {
+      this.isPolling = false;
+    }
+  }
+
+  dispose(): void {
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = undefined;
     }
   }
 }

@@ -22,8 +22,9 @@ export class RepoGroupItem extends vscode.TreeItem {
   ) {
     super(
       `${repoInfo.owner}/${repoInfo.repo}`,
-      vscode.TreeItemCollapsibleState.Expanded,
+      vscode.TreeItemCollapsibleState.Collapsed,
     );
+    this.id = `pr-repo:${repoInfo.key}`;
     this.contextValue = "repoGroup";
     this.description = repoInfo.currentBranch
       ? `(${repoInfo.currentBranch})`
@@ -42,6 +43,7 @@ export class PullRequestItem extends vscode.TreeItem {
       `#${pr.number} ${pr.title}`,
       vscode.TreeItemCollapsibleState.Collapsed,
     );
+    this.id = `pr:${repoInfo.key}:${pr.number}`;
     this.contextValue = "pullRequest";
     this.tooltip = new vscode.MarkdownString(
       `**#${pr.number}** ${pr.title}\n\n` +

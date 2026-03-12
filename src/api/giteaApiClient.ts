@@ -366,6 +366,18 @@ export class GiteaApiClient {
     return data?.jobs ?? [];
   }
 
+  async getWorkflowJob(
+    repoInfo: RepoInfo,
+    jobId: number,
+  ): Promise<GiteaWorkflowJob> {
+    const { serverUrl, owner, repo } = repoInfo;
+    const data = await this.request<GiteaWorkflowJob>(
+      serverUrl,
+      `/repos/${owner}/${repo}/actions/jobs/${jobId}`,
+    );
+    return data;
+  }
+
   async getJobLogs(repoInfo: RepoInfo, jobId: number): Promise<string> {
     const { serverUrl, owner, repo } = repoInfo;
     return this.requestText(

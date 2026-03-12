@@ -164,17 +164,21 @@ The **Issues** panel works similarly to PRs:
 
 ### CI / Actions
 
-The **CI / Actions** panel shows workflow runs per repository with **live status updates**:
+The **CI / Actions** panel shows workflow runs per repository with **manual refresh control**:
 
-- Workflow runs **auto-refresh every 5 seconds** when jobs are running (🔴 Live indicator)
-- Expand a run to see individual jobs with real-time status and duration
+- Use the **♻️ Refresh** button in the toolbar to reload all runs
+- Right-click on a repository → **Refresh Repository CI** for that repo only
+- Right-click on a job → **Refresh Job Status** to update individual job status
+- Expand a run to see individual jobs with status and duration
 - Click **📋 Logs** on any job to open the **live log streaming panel**:
-  - Logs stream in real-time with **auto-scroll to bottom**
+  - Logs stream in real-time with **auto-scroll to bottom**  (refreshes every 2 seconds)
   - Status updates automatically (⏳ running → ✅ success/❌ failure)
   - Scroll up to pause auto-scroll, scroll to bottom to resume
-  - Shows elapsed time for each job and step
+  - Shows elapsed time for each job
 - Context menu → **Re-run Workflow** or **Cancel Run**
 - Detail panel auto-refreshes every 3 seconds for running workflows
+
+> **Note**: Individual job steps are not shown in the tree view due to Gitea API limitations. View the job logs to see step-by-step execution details.
 
 ---
 
@@ -203,6 +207,20 @@ src/
     ├── prDetailPanel.ts        # PR webview panel (diff viewer)
     └── issueDetailPanel.ts     # Issue webview panel
 ```
+
+---
+
+## Known Limitations
+
+### CI / Actions - Step-Level Details
+
+**Issue**: Job steps are not expanded in the sidebar tree view.
+
+**Cause**: Gitea's REST API (as of v1.22) returns `"steps": null` for both the job list endpoint (`/actions/runs/{id}/jobs`) and individual job endpoint (`/actions/jobs/{id}`). Step-level execution details are only available through the web UI or by parsing raw logs.
+
+**Workaround**: Click **📋 Logs** on any job to view the complete execution log with all step outputs. The log stream shows timestamps and step names inline.
+
+**Note**: We've tested this with Gitea v1.22 and confirmed the API limitation. If you're using a newer version of Gitea that supports step details via API, please [open an issue](../../issues) and let us know!
 
 ---
 

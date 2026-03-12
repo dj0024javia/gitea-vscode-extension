@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { GiteaApiClient } from "../api/giteaApiClient";
-import { CIRunsProvider, CIRunItem, CIJobItem } from "../views/ciRunsProvider";
+import { CIRunsProvider, CIRunItem, CIJobItem, RepoGroupItem } from "../views/ciRunsProvider";
 import { CIDetailPanel } from "../views/ciDetailPanel";
 import { LiveLogPanel } from "../views/liveLogPanel";
 import type { GiteaWorkflowRun } from "../api/types";
@@ -15,6 +15,20 @@ export function registerCICommands(
     vscode.commands.registerCommand("gitea.refreshCI", () =>
       ciProvider.refresh(),
     ),
+
+    vscode.commands.registerCommand("gitea.refreshRepo", async (arg: RepoGroupItem) => {
+      if (arg instanceof RepoGroupItem) {
+        await ciProvider.refreshRepo(arg.repoInfo.key);
+        vscode.window.showInformationMessage(`Refreshed CI runs for ${arg.repoInfo.label}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("gitea.refreshJob", async (arg: CIJobItem) => {
+      if (arg instanceof CIJobItem) {
+        await ciProvider.refreshJob(arg.job.id, arg.runId, arg.repoInfo);
+        vscode.window.showInformationMessage(`Refreshed job: ${arg.job.name}`);
+      }
+    }),
 
     vscode.commands.registerCommand("gitea.loadMoreCI", (repoKey: string) => {
       ciProvider.loadMore(repoKey);

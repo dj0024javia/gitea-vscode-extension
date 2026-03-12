@@ -16,13 +16,16 @@ interface RepoCIState {
 export function iconForStatus(status: string): vscode.ThemeIcon {
   switch (status) {
     case "success":
+    case "completed":
       return new vscode.ThemeIcon(
         "pass",
         new vscode.ThemeColor("charts.green"),
       );
     case "failure":
+    case "failed":
       return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
     case "running":
+    case "in_progress":
       return new vscode.ThemeIcon("loading~spin");
     case "waiting":
     case "pending":
@@ -81,7 +84,8 @@ export class CIRunItem extends vscode.TreeItem {
     const isRunning =
       run.status === "running" ||
       run.status === "waiting" ||
-      run.status === "pending";
+      run.status === "pending" ||
+      run.status === "in_progress";
     this.description = isRunning ? `🔴 ${eventDesc}` : eventDesc;
     this.tooltip = new vscode.MarkdownString(
       `**${run.display_title || run.name}**\n\n` +
@@ -99,21 +103,39 @@ export class CIJobItem extends vscode.TreeItem {
     public readonly runId: number,
     public readonly repoInfo: RepoInfo,
   ) {
-    super(job.name, vscode.TreeItemCollapsibleState.Collapsed);
+    const isRunning = 
+      job.status === "running" || 
+      job.status === "waiting" ||
+      job.status === "in_progress";
+    
+    // Jobs are not expandable since Gitea API doesn't provide step details
+    super(job.name, vscode.TreeItemCollapsibleState.None);
     this.id = `job:${repoInfo.key}:${runId}:${job.id}`;
     this.contextValue = "ciJob";
     const status = job.conclusion || job.status;
-    const isRunning = job.status === "running" || job.status === "waiting";
+    
     this.description = isRunning ? `🔴 ${status}` : status;
     this.iconPath = iconForStatus(status);
-    this.tooltip = `${job.name} — ${status}${isRunning ? " (Live)" : ""}`;
+    this.tooltip = `${job.name} — ${status}${isRunning ? " (Live)" : ""}\n\nNote: Gitea API does not expose step-level details.\nView logs for detailed execution information.`;
   }
 }
 
 export class CIStepItem extends vscode.TreeItem {
   constructor(stepName: string, status: string, number: number) {
     super(`${number}. ${stepName}`, vscode.TreeItemCollapsibleState.None);
-    this.description = status;
+    const isRunning = status === "running" || status === "in_progress";
+    const isCompleted = status === "success" || status === "completed";
+    
+    // Highlight currently executing step
+    if (isRunning) {
+      this.description = `⚡ EXECUTING`;
+      this.tooltip = `Currently running: ${stepName}`;
+    } else if (isCompleted) {
+      this.description = "✓ completed";
+    } else {
+      this.description = status;
+    }
+    
     this.iconPath = iconForStatus(status);
   }
 }
@@ -143,8 +165,6 @@ export class CIRunsProvider
 
   private stateMap = new Map<string, RepoCIState>();
   private jobCache = new Map<number, GiteaWorkflowJob[]>();
-  private pollingTimer?: ReturnType<typeof setInterval>;
-  private isPolling = false;
 
   constructor(
     private readonly api: GiteaApiClient,
@@ -153,13 +173,48 @@ export class CIRunsProvider
   ) {
     repoManager.onDidChange(() => this.refresh());
     auth.onDidChangeSession(() => this.refresh());
-    this.startPolling();
+    // Auto-polling disabled - use manual refresh instead
   }
 
   refresh(): void {
     this.stateMap.clear();
     this.jobCache.clear();
     this._onDidChangeTreeData.fire();
+  }
+
+  async refreshRepo(repoKey: string): Promise<void> {
+    const state = this.stateMap.get(repoKey);
+    if (state) {
+      // Don't show loading indicator during refresh
+      const wasLoading = state.loading;
+      state.loading = false;
+      state.page = 1;
+      const repoInfo = this.repoManager.getRepos().find((r) => r.key === repoKey);
+      if (repoInfo) {
+        await this.fetchForRepo(repoInfo, state, true);
+      }
+      state.loading = wasLoading;
+    }
+  }
+
+  async refreshJob(jobId: number, runId: number, repoInfo: RepoInfo): Promise<void> {
+    try {
+      const job = await this.api.getWorkflowJob(repoInfo, jobId);
+      // Update job in cache
+      const jobs = this.jobCache.get(runId);
+      if (jobs) {
+        const index = jobs.findIndex((j) => j.id === jobId);
+        if (index !== -1) {
+          jobs[index] = job;
+          // Only fire update for this specific job's parent run
+          this._onDidChangeTreeData.fire();
+        }
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Failed to refresh job: ${(err as Error).message}`,
+      );
+    }
   }
 
   async loadMore(repoKey: string): Promise<void> {
@@ -217,11 +272,7 @@ export class CIRunsProvider
       return this.getJobsForRun(element.run.id, element.repoInfo);
     }
 
-    if (element instanceof CIJobItem) {
-      return (element.job.steps ?? []).map(
-        (s) => new CIStepItem(s.name, s.conclusion || s.status, s.number),
-      );
-    }
+    // Jobs are not expandable - Gitea API doesn't support step-level details
 
     return [];
   }
@@ -264,12 +315,16 @@ export class CIRunsProvider
   private async fetchForRepo(
     repoInfo: RepoInfo,
     state: RepoCIState,
+    silentRefresh: boolean = false,
   ): Promise<void> {
-    if (state.loading) {
+    if (state.loading && !silentRefresh) {
       return;
     }
-    state.loading = true;
-    this._onDidChangeTreeData.fire();
+    const shouldShowLoading = !silentRefresh;
+    if (shouldShowLoading) {
+      state.loading = true;
+      this._onDidChangeTreeData.fire();
+    }
     try {
       const config = vscode.workspace.getConfiguration("gitea");
       const limit: number = config.get<number>("itemsPerPage") ?? 20;
@@ -289,7 +344,9 @@ export class CIRunsProvider
       state.runs = [];
       state.hasMore = false;
     } finally {
-      state.loading = false;
+      if (shouldShowLoading) {
+        state.loading = false;
+      }
       this._onDidChangeTreeData.fire();
     }
   }
@@ -315,61 +372,7 @@ export class CIRunsProvider
     }
   }
 
-  private startPolling(): void {
-    // Poll every 5 seconds to check for running jobs
-    this.pollingTimer = setInterval(() => {
-      this.pollRunningJobs();
-    }, 5000);
-  }
-
-  private async pollRunningJobs(): Promise<void> {
-    if (this.isPolling) {
-      return;
-    }
-
-    // Check if we have any running jobs
-    let hasRunningJobs = false;
-    for (const [_, state] of this.stateMap) {
-      if (
-        state.runs.some(
-          (r) => r.status === "running" || r.status === "waiting" || r.status === "pending",
-        )
-      ) {
-        hasRunningJobs = true;
-        break;
-      }
-    }
-
-    if (!hasRunningJobs) {
-      return;
-    }
-
-    // Refresh to get latest status
-    this.isPolling = true;
-    try {
-      // Refresh each repo that has running jobs
-      for (const [repoKey, state] of this.stateMap) {
-        const hasRunning = state.runs.some(
-          (r) => r.status === "running" || r.status === "waiting" || r.status === "pending",
-        );
-        if (hasRunning) {
-          const repoInfo = this.repoManager
-            .getRepos()
-            .find((r) => r.key === repoKey);
-          if (repoInfo) {
-            await this.fetchForRepo(repoInfo, state);
-          }
-        }
-      }
-    } finally {
-      this.isPolling = false;
-    }
-  }
-
   dispose(): void {
-    if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = undefined;
-    }
+    // Cleanup if needed
   }
 }

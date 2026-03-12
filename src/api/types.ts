@@ -146,6 +146,7 @@ export interface GiteaWorkflowRun {
     | "unknown"
     | "waiting"
     | "running"
+    | "in_progress"
     | "success"
     | "failure"
     | "cancelled"
@@ -177,7 +178,7 @@ export interface GiteaWorkflowJob {
   started_at: string;
   completed_at: string;
   html_url: string;
-  steps: GiteaJobStep[];
+  steps?: GiteaJobStep[];
   runner_name: string;
 }
 

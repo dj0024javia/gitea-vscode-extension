@@ -50,7 +50,8 @@ export class CIDetailPanel {
     this.isRunning =
       run.status === "running" ||
       run.status === "waiting" ||
-      run.status === "pending";
+      run.status === "pending" ||
+      run.status === "in_progress";
 
     // Start auto-refresh for running workflows
     if (this.isRunning) {
@@ -121,7 +122,8 @@ export class CIDetailPanel {
       this.isRunning =
         run.status === "running" ||
         run.status === "waiting" ||
-        run.status === "pending";
+        run.status === "pending" ||
+        run.status === "in_progress";
 
       // Start or stop polling based on status
       if (!wasRunning && this.isRunning) {
@@ -163,8 +165,11 @@ export class CIDetailPanel {
   private renderHtml(run: GiteaWorkflowRun, jobs: GiteaWorkflowJob[]): string {
     const statusIcons: Record<string, string> = {
       success: "✅",
+      completed: "✅",
       failure: "❌",
+      failed: "❌",
       running: "⏳",
+      in_progress: "⏳",
       waiting: "⏸",
       pending: "⏸",
       cancelled: "🚫",
@@ -211,7 +216,13 @@ export class CIDetailPanel {
                 .map(
                   (s) => {
                     const stepDuration = getDuration(s.started_at, s.completed_at);
-                    return `<div class="step ${s.conclusion || s.status}">${statusIcons[s.conclusion || s.status] ?? "•"} ${escHtml(s.name)} <span class="badge">${escHtml(s.conclusion || s.status)}</span>${stepDuration ? ` <span class="duration">${stepDuration}</span>` : ""}</div>`;
+                    const stepStatus = s.conclusion || s.status;
+                    const isRunning = stepStatus === "running" || stepStatus === "in_progress";
+                    const isCompleted = stepStatus === "success" || stepStatus === "completed";
+                    const stepIcon = isRunning ? '<span class="spinner">⏳</span>' : (statusIcons[stepStatus] ?? "•");
+                    const statusClass = isRunning ? 'step-running' : isCompleted ? 'step-completed' : '';
+                    const executingLabel = isRunning ? '<span class="executing-label">⚡ EXECUTING</span>' : '';
+                    return `<div class="step ${stepStatus} ${statusClass}">${stepIcon} <span class="step-name">${escHtml(s.name)}</span> ${executingLabel}<span class="badge badge-${stepStatus}">${escHtml(stepStatus)}</span>${stepDuration ? ` <span class="duration">${stepDuration}</span>` : (isRunning ? ' <span class="duration running-indicator">Running...</span>' : '')}</div>`;
                   },
                 )
                 .join("");
@@ -252,11 +263,30 @@ export class CIDetailPanel {
   .steps { padding: 8px 12px; }
   .step { padding: 3px 6px; font-size: 0.85em; border-bottom: 1px solid var(--vscode-panel-border); display: flex; align-items: center; gap: 8px; }
   .step:last-child { border-bottom: none; }
+  .step-running { background: rgba(255, 255, 0, 0.05); border-left: 3px solid var(--vscode-charts-yellow); }
+  .step-completed { opacity: 0.7; }
+  .step-name { flex: 1; }
+  .executing-label { 
+    color: var(--vscode-charts-yellow); 
+    font-weight: 700; 
+    font-size: 0.75em; 
+    background: rgba(255, 255, 0, 0.2); 
+    padding: 2px 6px; 
+    border-radius: 3px;
+    margin-right: 4px;
+    letter-spacing: 0.5px;
+  }
+  .spinner { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .running-indicator { color: var(--vscode-charts-yellow); font-weight: 500; }
   .empty { color: var(--vscode-descriptionForeground); font-style: italic; font-size: 0.85em; }
   .duration { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-left: auto; font-family: var(--vscode-editor-font-family); }
   .live-indicator { display: inline-flex; align-items: center; gap: 4px; color: var(--vscode-charts-green); font-size: 0.85em; }
   .pulse { width: 8px; height: 8px; background: var(--vscode-charts-green); border-radius: 50%; animation: pulse 1.5s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .badge-running, .badge-in_progress { background: var(--vscode-charts-yellow); color: var(--vscode-editor-background); }
+  .badge-success, .badge-completed { background: var(--vscode-charts-green); color: var(--vscode-editor-background); }
+  .badge-failure, .badge-failed { background: var(--vscode-charts-red); color: var(--vscode-editor-foreground); }
 </style>
 </head>
 <body>
